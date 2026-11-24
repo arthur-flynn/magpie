@@ -1298,15 +1298,21 @@ func (s *Server) codexUpstreamOn(w http.ResponseWriter, r *http.Request, rest st
 				// what Codex said it takes back stays as it said it
 				accept := req.Header.Values("Accept")
 				if err := on.Sign(ctx, req, provider.Responses, body); err != nil {
-					msg := "OpenAI (" + on.Account.User + "): " + err.Error()
-					writeError(w, provider.Responses, 502, msg)
-					end(502, msg, 0, 0)
+					// a sign-in to make again is told as the standard 503,
+					// as on the agent APIs (signin_unavailable.go); any
+					// other failure keeps its own words
+					status, msg := http.StatusBadGateway, "OpenAI ("+on.Account.User+"): "+err.Error()
+					if provider.SignInGone([]byte(err.Error())) {
+						status, msg = http.StatusServiceUnavailable, signInUnavailableText
+					}
+					writeError(w, provider.Responses, status, msg)
+					end(status, msg, 0, 0)
 					return
 				}
 				// a sign-in its vendor revoked isn't sent again (#1793)
-				if why, ok := provider.RevokedSignIn(on.Account, req); ok {
-					writeError(w, provider.Responses, 401, why)
-					end(401, why, 0, 0)
+				if _, ok := provider.RevokedSignIn(on.Account, req); ok {
+					writeError(w, provider.Responses, http.StatusServiceUnavailable, signInUnavailableText)
+					end(http.StatusServiceUnavailable, signInUnavailableText, 0, 0)
 					return
 				}
 				req.Header.Del("Accept")
@@ -1539,6 +1545,11 @@ func (s *Server) codexUpstreamOn(w http.ResponseWriter, r *http.Request, rest st
 			out.Header().Set("Content-Type", "text/event-stream")
 		}
 		modelsEtag(out.Header())
+		if on == nil {
+			// Codex's own sign-in: its 401 goes as it came, for Codex to
+			// renew (signin_unavailable.go)
+			keepSignInStatus(r.Context())
+		}
 		out.WriteHeader(res.StatusCode)
 		stopWatch := func() {}
 		if hw != nil {

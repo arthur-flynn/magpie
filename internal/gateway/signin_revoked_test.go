@@ -219,7 +219,8 @@ func TestRevokedSignInNotCompactedOnAgain(t *testing.T) {
 		defer mu.Unlock()
 		return rec.Code, strings.Join(tried, ",")
 	}
-	if code, asked := compact(); code != 401 || asked != "acct-2" {
+	// told as the standard 503, not the account's own 401 (#mibo)
+	if code, asked := compact(); code != 503 || asked != "acct-2" {
 		t.Fatalf("first: %d, asked %s", code, asked)
 	}
 	if got := codexLapsed(t, "spare@example.com"); !strings.Contains(got, "sign in again") {
